@@ -1,11 +1,16 @@
 package com.gplex;
 
+import com.iheartradio.m3u8.Encoding;
+import com.iheartradio.m3u8.Format;
+import com.iheartradio.m3u8.PlaylistParser;
+import com.iheartradio.m3u8.data.MasterPlaylist;
+import com.iheartradio.m3u8.data.MediaPlaylist;
+import com.iheartradio.m3u8.data.Playlist;
+import com.iheartradio.m3u8.data.PlaylistData;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
-import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.time.StopWatch;
 import org.joda.time.Duration;
-import org.joda.time.format.PeriodFormatter;
-import org.joda.time.format.PeriodFormatterBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.Banner;
@@ -16,15 +21,12 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import java.io.*;
 import java.net.URI;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * bl.rutube.ru/route
@@ -35,8 +37,8 @@ public class StreamDownloaderApplication implements CommandLineRunner {
     private static final String URL = "url";
     private static final String OUT = "out";
 
-    public static void main(String[] args) throws Exception {
 
+    public static void main(String[] args) throws Exception {
         //disabled banner, don't want to see the spring logo
         SpringApplication app = new SpringApplication(StreamDownloaderApplication.class);
         app.setBannerMode(Banner.Mode.OFF);
@@ -52,171 +54,190 @@ public class StreamDownloaderApplication implements CommandLineRunner {
                     uri.getPath(),
                     null, // Ignore the query part of the input url
                     uri.getFragment()).toString();
-        }catch (Exception e){
-            logger.error("",e);
+        } catch (Exception e) {
+            logger.error("", e);
         }
         return null;
     }
 
 
-    static final PeriodFormatter formatter = new PeriodFormatterBuilder()
-            .appendDays()
-            .appendSuffix("d ")
-            .appendHours()
-            .appendSuffix("h ")
-            .appendMinutes()
-            .appendSuffix("m ")
-            .appendSeconds()
-            .appendSuffix("s")
-            .toFormatter();
-
-
     // Put your logic here.
     @Override
     public void run(String... args) throws Exception {
-        Map<String, String> argMap = new HashMap<>();
-        for (String a : args) {
-            String[] spl = a.split("=", 2);
-            argMap.put(spl[0].toLowerCase(), spl.length > 1 ? spl[1] : null);
-        }
-        if (!argMap.containsKey(URL)) {
-            logger.error("url is required parameter");
-            return;//exit(0);
-        }
+        StopWatch sw = new StopWatch();
+        sw.start();
+        CommandLineArgs cla = new CommandLineArgs();
+        cla.parceArgs(args);
+        Set<String> filesToDelete = new HashSet<>();
 
-        if( StringUtils.isBlank(argMap.get(OUT))){
-            argMap.put(OUT, "out.mp4");
-        }
-        URL url = new URL(argMap.get(URL));
-        String m3u8FileName = FilenameUtils.getName(url.getPath());
-        logger.info("{}", m3u8FileName);
+        logger.debug("{}", cla.url);
 
-        FileUtils.copyURLToFile(url, new File(m3u8FileName), 10000, 10000);
+        URL url = new URL(cla.url);
+        String playlistFileName = FilenameUtils.getName(url.getPath());
+        logger.info("{}", playlistFileName);
 
+        FileUtils.copyURLToFile(url, new File(playlistFileName), 10000, 10000);
+        filesToDelete.add(playlistFileName);
 
-        FileReader fr = new FileReader(m3u8FileName);
+        FileReader fr = new FileReader(playlistFileName);
         BufferedReader br = new BufferedReader(fr);
-        String sCurrentLine;
-        List<String> fragments = new ArrayList<>();
-        String baseUrl = getUrlWithoutParameters(url.toString()).replace(m3u8FileName, "");
-        while ((sCurrentLine = br.readLine()) != null) {
-            if (sCurrentLine.endsWith(".ts")) {
-                fragments.add(baseUrl + sCurrentLine);
+
+        InputStream inputStream = new FileInputStream(new File(playlistFileName));
+        PlaylistParser parser = new PlaylistParser(inputStream, Format.EXT_M3U, Encoding.UTF_8);
+        Playlist pl = parser.parse();
+        MediaPlaylist mpl = null;
+        String baseUrl = getUrlWithoutParameters(url.toString()).replace(playlistFileName, "");
+        if (pl.hasMasterPlaylist()) {
+            MasterPlaylist masterPlayList = pl.getMasterPlaylist();
+            List<PlaylistData> playLists = masterPlayList.getPlaylists();
+            PlaylistData playlistData = null;
+            logger.debug("Available bitrate");
+            for (PlaylistData playList : playLists) {
+                logger.debug("bitrate {}\t-\tresolution {}\t-\t{}", playList.getStreamInfo().getBandwidth(), playList.getStreamInfo().getResolution() != null ? playList.getStreamInfo().getResolution().toString() : "Not available", playList.getUri());
             }
+            if (cla.bitrate < playLists.size() && cla.bitrate >= 0) {
+                playlistData = playLists.get(cla.bitrate);
+            } else {
+                playlistData = playLists.get(0);
+            }
+
+
+            URL playlistURL = new URL(playlistData.getUri());
+            playlistFileName = FilenameUtils.getName(playlistURL.getPath());
+            filesToDelete.add(playlistFileName);
+            logger.info("{}", playlistFileName);
+
+            FileUtils.copyURLToFile(playlistURL, new File(playlistFileName), 10000, 10000);
+            baseUrl = getUrlWithoutParameters(playlistURL.toString()).replace(playlistFileName, "");
+            inputStream = new FileInputStream(new File(playlistFileName));
+            parser = new PlaylistParser(inputStream, Format.EXT_M3U, Encoding.UTF_8);
+            pl = parser.parse();
+
+            logger.debug(" -> {}");
+
+
         }
 
-        logger.info("total fragments = {} with video duration = {}", fragments.size(), formatter.print(new Duration(fragments.size() * 8000).toPeriod()));
-        if(true) {
-            final AtomicInteger i = new AtomicInteger(0);
-            final CountDownLatch latch = new CountDownLatch(fragments.size());
-            ForkJoinPool customThreadPool = new ForkJoinPool(30);
-            customThreadPool.submit(
-                    () -> fragments.parallelStream().forEach(f -> {
-
-                        try {
-                            Pattern pattern = Pattern.compile("(.*mp4Frag)(?<frag>\\d+)(Num)(?<num>\\d+)(.*)");
-                        Matcher matcher = pattern.matcher(f);
-                        matcher.find();
-                        String nm  = String.format("%04d", Integer.valueOf(matcher.group("num")));
-                        String fName = m3u8FileName + "_"+ nm+".ts";
-
-                            URL u = new URL(f);
-                            FileUtils.copyURLToFile(u, new File(fName), 10000, 10000);
-
-                        } catch (Exception e) {
-                            logger.error("", e);
-                        } finally {
-                            latch.countDown();
-                        }
-                        logger.info("fragment {} downloaded", f);
-                    }));
-
-            latch.await();
-
-            FileWriter writer = new FileWriter("ts.list");
-            for (String f : fragments) {
-                writer.write("file '" + FilenameUtils.getName(new URL(f).getPath()) + "'\n");
-            }
-            writer.close();
+        if (!pl.hasMediaPlaylist()) {
+            logger.error("No playlist detected");
+            return;
         }
+
+        mpl = pl.getMediaPlaylist();
+
+        int duration = mpl.getTargetDuration();
+
+
+
+
+        logger.info("total fragments = {} with video duration = {}", mpl.getTracks().size(), Utils.formatter.print(new Duration(mpl.getTracks().size() * duration * 1000).toPeriod()));
+
+        final AtomicInteger i = new AtomicInteger(0);
+        final CountDownLatch latch = new CountDownLatch(mpl.getTracks().size());
+        final String plfn = playlistFileName;
+        ForkJoinPool customThreadPool = new ForkJoinPool(50);
+        final MediaPlaylist mp = mpl;
+        final String fragmentBaseUrl = baseUrl;
+        customThreadPool.submit(
+                () -> mp.getTracks().parallelStream().forEach(f -> {
+                    int num = i.getAndIncrement();
+                    try {
+                        //Pattern pattern = Pattern.compile("(.*mp4Frag)(?<frag>\\d+)(Num)(?<num>\\d+)(.*)");
+                        //Matcher matcher = pattern.matcher(f.getUri());
+                        //matcher.find();
+                        String nm = String.format("%04d", num);
+                        String fName = plfn + "_" + nm + ".ts";
+
+                        URL u = new URL(fragmentBaseUrl + f.getUri());
+                        FileUtils.copyURLToFile(u, new File(fName), 10000, 10000);
+
+                    } catch (Exception e) {
+                        logger.error("", e);
+                    } finally {
+                        latch.countDown();
+                    }
+                    logger.info("fragment {} downloaded", f);
+                }));
+
+        latch.await();
+
         logger.info("--- STARTING FRAGMENT MERGING ---");
         exec("ls");
-
 
 
         String s = null;
 
 
         //in mac oxs
-       // String command = "echo Hello world!\nffmpeg -y -f concat -safe 0 -i ts.list -c copy " + argMap.get(OUT);
-        String command = "cat $(ls "+m3u8FileName.replace(".m3u8","")+"*.ts) > "+ argMap.get(OUT);
+        // String command = "echo Hello world!\nffmpeg -y -f concat -safe 0 -i ts.list -c copy " + argMap.get(OUT);
+        String command = "cat $(ls " + playlistFileName.replace(".m3u8", "") + "*.ts) > " + cla.out;
 
         exec(command);
         //delete temp files
-        if(argMap.get("d") == null || argMap.get("d").equalsIgnoreCase("true")){
-            /*for (String f : fragments) {
-                deleteFile(FilenameUtils.getName(new URL(f).getPath()));
+        if (cla.deleteTemp) {
+            exec("rm -f " + playlistFileName + "*");
+            filesToDelete.forEach(fileName -> exec("rm -f "+ fileName));
 
+        }
+
+        File out = new File(cla.out);
+        logger.info("\n\n[{}] -> size of {} was downloaded in {}\n\n", out.getName(), FileUtils.byteCountToDisplaySize(out.length()), Utils.formatter.print(new Duration(sw.getTime()).toPeriod()));
+    }
+
+    public static void exec(String command) {
+        try {
+
+            logger.info("Executing shell command: {}", command);
+
+
+            // Start the shell
+            ProcessBuilder pb = new ProcessBuilder("/bin/bash");
+            Process bash = pb.start();
+
+            // Pass commands to the shell
+            PrintStream ps = new PrintStream(bash.getOutputStream());
+            ps.println(command);
+            ps.close();
+
+            // Get an InputStream for the stdout of the shell
+            BufferedReader br = new BufferedReader(
+                    new InputStreamReader(bash.getInputStream()));
+
+            BufferedReader ebr = new BufferedReader(
+                    new InputStreamReader(bash.getErrorStream()));
+
+            // Retrieve and print output
+            String line;
+            while (null != (line = br.readLine())) {
+                logger.info("> " + line);
+            }
+            while (null != (line = ebr.readLine())) {
+                logger.error("> " + line);
             }
 
-            deleteFile(m3u8FileName);*/
-            exec("rm -f "+ m3u8FileName+"*");
-            exec("rm -f ts.list");
+            br.close();
+            ebr.close();
+
+            // Make sure the shell has terminated, print out exit value
+            System.out.println("Exit code: " + bash.waitFor());
+        }catch (Exception e){
+            logger.error("",e);
         }
-
-
-
-    }
-
-    public static void exec(String command) throws Exception {
-        logger.info("Executing shell command: {}",command );
-
-        // Start the shell
-        ProcessBuilder pb = new ProcessBuilder("/bin/bash");
-        Process bash = pb.start();
-
-        // Pass commands to the shell
-        PrintStream ps = new PrintStream(bash.getOutputStream());
-        ps.println(command);
-        ps.close();
-
-        // Get an InputStream for the stdout of the shell
-        BufferedReader br = new BufferedReader(
-                new InputStreamReader(bash.getInputStream()));
-
-        BufferedReader ebr = new BufferedReader(
-                new InputStreamReader(bash.getErrorStream()));
-
-        // Retrieve and print output
-        String line;
-        while (null != (line = br.readLine())) {
-           logger.info("> "+line);
-        }
-        while (null != (line = ebr.readLine())) {
-            logger.error("> "+line);
-        }
-
-        br.close();
-        ebr.close();
-
-        // Make sure the shell has terminated, print out exit value
-        System.out.println("Exit code: " + bash.waitFor());
-
     }
 
 
-    private void deleteFile(String name){
-        try{
+    private void deleteFile(String name) {
+        try {
 
             File file = new File(name);
 
-            if(file.delete()){
+            if (file.delete()) {
                 logger.info(file.getName() + " is deleted!");
-            }else{
+            } else {
                 logger.error("Delete operation is failed for {}.", file.getName());
             }
 
-        }catch(Exception e){
+        } catch (Exception e) {
 
             logger.error("", e);
 
