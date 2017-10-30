@@ -4,22 +4,27 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @RunWith(SpringRunner.class)
-@SpringBootTest
+@ActiveProfiles("test")
+@SpringBootTest(classes = StreamDownloaderApplicationTests.TestApplicationConfiguration.class)
 public class StreamDownloaderApplicationTests {
 	private static final Logger logger = LoggerFactory.getLogger(StreamDownloaderApplicationTests.class);
+
 	@Test
-	public void contextLoads() {
+	public void contextLoads() throws Exception {
 	}
 
 	@Test
 	public void execute() throws  Exception {
+
 		StreamDownloaderApplication.exec("ls");
 		StreamDownloaderApplication.exec("ffmpeg -f concat -safe 0 -i ts.list -c copy result.mp4");
 
@@ -37,4 +42,10 @@ public class StreamDownloaderApplicationTests {
 
 	}
 
+    class TestApplicationConfiguration  implements CommandLineRunner {
+        @Override
+        public void run(String... args) throws Exception {
+
+        }
+    }
 }
