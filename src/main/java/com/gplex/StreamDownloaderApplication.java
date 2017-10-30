@@ -17,7 +17,6 @@ import org.springframework.boot.Banner;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.Profile;
 
 import java.io.*;
 import java.net.URI;
@@ -33,7 +32,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * bl.rutube.ru/route
  */
 @SpringBootApplication
-@Profile("prod")
 public class StreamDownloaderApplication implements CommandLineRunner {
     private static final Logger logger = LoggerFactory.getLogger(StreamDownloaderApplication.class);
     private static final String URL = "url";
