@@ -42,6 +42,7 @@ public class StreamDownloaderApplicationTests {
 
 	}
 
+
     class TestApplicationConfiguration  implements CommandLineRunner {
         @Override
         public void run(String... args) throws Exception {

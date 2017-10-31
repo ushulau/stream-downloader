@@ -25,3 +25,6 @@ nbdist/
 *.jar
 *.mp4
 .mvn
+key.key
+pub.pem
+encrypted.ts

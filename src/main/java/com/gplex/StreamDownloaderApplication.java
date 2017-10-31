@@ -3,10 +3,7 @@ package com.gplex;
 import com.iheartradio.m3u8.Encoding;
 import com.iheartradio.m3u8.Format;
 import com.iheartradio.m3u8.PlaylistParser;
-import com.iheartradio.m3u8.data.MasterPlaylist;
-import com.iheartradio.m3u8.data.MediaPlaylist;
-import com.iheartradio.m3u8.data.Playlist;
-import com.iheartradio.m3u8.data.PlaylistData;
+import com.iheartradio.m3u8.data.*;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.time.StopWatch;
@@ -21,9 +18,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import java.io.*;
 import java.net.URI;
 import java.net.URL;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -138,15 +133,21 @@ public class StreamDownloaderApplication implements CommandLineRunner {
         ForkJoinPool customThreadPool = new ForkJoinPool(50);
         final MediaPlaylist mp = mpl;
         final String fragmentBaseUrl = baseUrl;
+        final Map<String, String> indexMap = new HashMap<>();
+        int a = 0;
+        for(TrackData tr: mp.getTracks()){
+            indexMap.put(tr.getUri(), String.format("%05d", a));
+            a++;
+        }
+
         customThreadPool.submit(
                 () -> mp.getTracks().parallelStream().forEach(f -> {
                     int num = i.getAndIncrement();
                     try {
                         //Pattern pattern = Pattern.compile("(.*mp4Frag)(?<frag>\\d+)(Num)(?<num>\\d+)(.*)");
                         //Matcher matcher = pattern.matcher(f.getUri());
-                        //matcher.find();
-                        String nm = String.format("%04d", num);
-                        String fName = plfn + "_" + nm + ".ts";
+                        //matcher.find();//Integer.valueOf(matcher.group("num")
+                        String fName = plfn + "_" + indexMap.get(f.getUri()) + ".ts";
 
                         URL u = new URL(fragmentBaseUrl + f.getUri());
                         FileUtils.copyURLToFile(u, new File(fName), 10000, 10000);
